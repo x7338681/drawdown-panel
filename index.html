@@ -171,6 +171,15 @@ async function boot(){
     return;
   }
 
+/* =========================================================
+   兩套指標互不共用「結果視窗」
+   A. 回撤買進：高點跌破門檻（資料在 data.json）
+      回成本天數 = 第一次漲回買進價
+   B. 均線跌破：收盤跌破 MA（瀏覽器現算）
+      回成本天數 = 只給表格參考，不用來畫紅點
+      停損／停利 = 只看買進後 HORIZON_DAYS 天
+   ========================================================= */
+const HORIZON_DAYS = 365; // 均線停損停利專用，不要拿回成本日替代
 const DOT = ["#fbbf24","#fb7185","#991b1b"];
 const HZN = [
   {key:"1m", label:"1個月", short:"1M", color:"#22d3ee", bg:"rgba(34,211,238,.22)"},
@@ -233,6 +242,22 @@ function fwdFrom(series, i, days){
   }
   return {date:null, px:null, ret:null};
 }
+function firstExit(series, i, sl, tp){
+  const buy=series[i].p;
+  const slPx=buy*(1+sl/100), tpPx=buy*(1+tp/100);
+  for(let j=i+1;j<series.length;j++){
+    const hitSl=series[j].p<=slPx+1e-12;
+    const hitTp=series[j].p>=tpPx-1e-12;
+    if(!hitSl && !hitTp) continue;
+    const a=parseDate(series[i].d), b=parseDate(series[j].d);
+    const days=Math.round((b-a)/86400000);
+    const ret=Math.round((series[j].p/buy-1)*1000)/10;
+    // 同一根K若理論上兩邊都觸及（幾乎不會），視為先停損
+    const kind = hitSl ? "sl" : "tp";
+    return {kind, date:series[j].d, px:series[j].p, days, ret};
+  }
+  return {kind:"open", date:null, px:null, days:null, ret:null};
+}
 function maEventsFor(period, maArr, idx){
   const series=DATA.series, px=series.map(p=>p.p);
   const hz=[["1m",30],["3m",91],["6m",182],["9m",273],["1y",365],["3y",1095]];
@@ -244,7 +269,7 @@ function maEventsFor(period, maArr, idx){
     const buy=px[i];
     let extra=buy, extraJ=i, peak=buy, peakJ=i;
     const rec=daysUntilPx(series,i,buy);
-    const holdTo=new Date(parseDate(series[i].d).getTime()+365*86400000);
+    const holdTo=new Date(parseDate(series[i].d).getTime()+HORIZON_DAYS*86400000);
     let end=px.length-1;
     for(let j=i;j<px.length;j++){
       if(parseDate(series[j].d)>=holdTo){ end=j; break; }
@@ -296,8 +321,10 @@ function computeMa(){
   document.getElementById("tpPct").value=tpPct;
   maBuys = maEventsFor(f, fast, 0).concat(maEventsFor(s, slow, 1));
   maBuys.forEach(e=>{
-    e.stopped = e.extra_dd!=null && e.extra_dd<=slPct;
-    e.takeprofit = e.mfe!=null && e.mfe>=tpPct;
+    const i=DATA.series.findIndex(p=>p.d===e.buy_date);
+    e.exit = i>=0 ? firstExit(DATA.series, i, slPct, tpPct) : {kind:"open"};
+    e.stopped = e.exit.kind==="sl";
+    e.takeprofit = e.exit.kind==="tp";
   });
 }
 function applyMode(){
@@ -309,7 +336,7 @@ function applyMode(){
     document.getElementById("headTitle").textContent = `${name}：跌破均線買進`;
     document.getElementById("headSub").textContent = `${DATA.start} – ${DATA.asof}｜收盤跌破 ${maFast}MA / ${maSlow}MA` + (DATA.updated ? `｜資料更新 ${DATA.updated}` : "");
     document.getElementById("ruleTitle").innerHTML = `收盤跌破 ${maFast}MA 或 ${maSlow}MA 當天買進<br>從上到下穿越才算一次，比較哪一條期望值較高`;
-    document.getElementById("ruleNote").textContent = "跌破＝昨天收盤還在均線上（含觸及），今天收盤跌到均線下。同一條均線要先站回去，才會再記下一次。不含配息。";
+    document.getElementById("ruleNote").textContent = "進場：昨天在均線上、今天收盤跌破。停損／停利：只看買進後 1 年內有沒有碰到，跟「回成本天數」無關。回成本只是參考解套多久。不含配息。";
     document.getElementById("chartHint").textContent = `黃＝跌破 ${maFast}MA　紫＝跌破 ${maSlow}MA　紅＝買進後再跌到 ${slPct}%`;
     document.getElementById("legend").innerHTML =
       `<span><i class="dot" style="background:#fbbf24"></i>跌破 ${maFast}MA</span>
@@ -370,8 +397,10 @@ function evCards(){
       <div class="row"><span>1年勝率</span><b>${fmtW(win(r1))}</b></div>
       <div class="row"><span>3年平均（${r3.length}筆）</span><b class="${avg(r3)>=0?"g":"red"}">${fmtA(avg(r3))}</b></div>
       <div class="row"><span>3年勝率</span><b class="g">${fmtW(win(r3))}</b></div>
-      ${mode==="ma"?`<div class="row"><span>1年內觸及停損 ${slPct}%</span><b class="red">${eps.length?Math.round(100*eps.filter(e=>e.stopped).length/eps.length):0}%</b></div>
-      <div class="row"><span>1年內觸及停利 +${tpPct}%</span><b class="g">${eps.length?Math.round(100*eps.filter(e=>e.takeprofit).length/eps.length):0}%</b></div>`:""}
+      ${mode==="ma"?`<div class="row"><span>先碰到停損 ${slPct}%</span><b class="red">${eps.length?Math.round(100*eps.filter(e=>e.exit&&e.exit.kind==="sl").length/eps.length):0}%</b></div>
+      <div class="row"><span>先碰到停利 +${tpPct}%</span><b class="g">${eps.length?Math.round(100*eps.filter(e=>e.exit&&e.exit.kind==="tp").length/eps.length):0}%</b></div>
+      <div class="row"><span>停利中位天數</span><b class="g">${(()=>{const a=eps.filter(e=>e.exit&&e.exit.kind==="tp").map(e=>e.exit.days); return a.length?(med(a)+" 天"):"—";})()}</b></div>
+      <div class="row"><span>停損中位天數</span><b class="red">${(()=>{const a=eps.filter(e=>e.exit&&e.exit.kind==="sl").map(e=>e.exit.days); return a.length?(med(a)+" 天"):"—";})()}</b></div>`:""}
     </div>`;
   }).join("");
 }
@@ -380,7 +409,22 @@ function renderFwd(e){
   if(!e){ box.style.display="none"; return; }
   box.style.display="block";
   document.getElementById("fwdTitle").textContent = (mode==="ma"? `跌破 ${e.period}MA`:`−${e.th}% 買進`) + `　${e.buy_date}　成本 ${money(e.buy_px)}`;
-  document.getElementById("fwdSub").textContent = `回成本 ${e.cost_date||"尚未"}（${e.cost_days??"—"} 天）　買進後再跌 ${e.extra_dd}%` + (mode==="ma"?((e.stopped?`　已觸及停損 ${slPct}%`:`　未觸及停損 ${slPct}%`)+(e.takeprofit?`　已觸及停利 +${tpPct}%`:`　未觸及停利 +${tpPct}%`)+`　最高曾 +${e.mfe}%`):"");
+  if(mode==="ma"){
+    const x=e.exit||{kind:"open"};
+    let sub="不是先停損，就是先停利。同一天收盤只會算一邊。";
+    if(x.kind==="tp") sub=`先碰到停利 +${tpPct}%　花了 ${x.days} 天　${x.date}　${money(x.px)}`;
+    else if(x.kind==="sl") sub=`先碰到停損 ${slPct}%　花了 ${x.days} 天　${x.date}　${money(x.px)}`;
+    else sub=`到 ${DATA.asof} 還沒碰到停損 ${slPct}% 也還沒碰到停利 +${tpPct}%`;
+    document.getElementById("fwdSub").textContent=sub;
+    document.getElementById("fwdGrid").innerHTML = `
+      <div class="fwd" style="border-color:${x.kind==="tp"?"#34d399":x.kind==="sl"?"#ef4444":"#64748b"}66">
+        <div class="h">${x.kind==="tp"?"停利":x.kind==="sl"?"停損":"尚未出場"}</div>
+        <div class="v ${x.kind==="tp"?"g":x.kind==="sl"?"red":""}">${x.kind==="open"?"—":(x.days+" 天")}</div>
+        <div class="d">${x.kind==="open"?"資料尚未碰到目標":(x.date+"　"+pct(x.ret))}</div>
+      </div>`;
+    return;
+  }
+  document.getElementById("fwdSub").textContent = `回成本 ${e.cost_date||"尚未"}（${e.cost_days??"—"} 天）　買進後再跌 ${e.extra_dd}%`;
   document.getElementById("fwdGrid").innerHTML = HZN.map(h=>{
     const f=e.fwd[h.key]; const ret=f&&f.ret;
     return `<div class="fwd" style="border-color:${h.color}66">
@@ -467,7 +511,27 @@ function drawMain(){
       <text x="${C.m.l-8}" y="${yy+4}" text-anchor="end" fill="#94a3b8" font-size="11">${lab}</text>`;
   }
   let bands="", segs="", marks2="", labels="";
-  if(selected){
+  if(selected && mode==="ma"){
+    const e=selected, x=e.exit||{};
+    const endD = x.date || DATA.asof;
+    const col = x.kind==="tp"?"#34d399":x.kind==="sl"?"#ef4444":"#94a3b8";
+    const chunk=seriesBetween(e.buy_date,endD).filter(p=>p.d>=series[0].d && p.d<=series[series.length-1].d);
+    if(chunk.length>=2){
+      segs+=`<polyline fill="none" stroke="${col}" stroke-width="3.2" points="${chunk.map(p=>C.xS(p.d).toFixed(1)+','+C.yOf(p.p).toFixed(1)).join(' ')}"/>`;
+    }
+    const xb=C.xS(e.buy_date);
+    if(parseDate(e.buy_date)>=C.t0 && parseDate(e.buy_date)<=C.t1){
+      bands+=`<line x1="${xb}" y1="4" x2="${xb}" y2="${C.m.t+C.plotH}" stroke="#e2e8f0" stroke-width="1.2" stroke-dasharray="4 3"/>`;
+      labels+=`<text x="${xb.toFixed(1)}" y="15" text-anchor="middle" fill="#cbd5e1" font-size="11">買進</text>`;
+    }
+    if(x.date && parseDate(x.date)>=C.t0 && parseDate(x.date)<=C.t1){
+      const xe=C.xS(x.date), ye=C.yOf(x.px);
+      bands+=`<line x1="${xe}" y1="4" x2="${xe}" y2="${C.m.t+C.plotH}" stroke="${col}" stroke-width="1.15" stroke-dasharray="3 4"/>`;
+      marks2+=`<circle cx="${xe}" cy="${ye}" r="4" fill="${col}" stroke="#0b1220"/>`;
+      labels+=`<text x="${xe.toFixed(1)}" y="15" text-anchor="middle" fill="${col}" font-size="11">${x.kind==="tp"?"停利":"停損"}</text>`;
+      labels+=`<text x="${xe.toFixed(1)}" y="29" text-anchor="middle" fill="${col}" font-size="12" font-weight="800">${x.days}天</text>`;
+    }
+  } else if(selected){
     const e=selected; let prev=e.buy_date;
     HZN.forEach(h=>{
       const f=e.fwd[h.key]; if(!f||!f.date) return;
