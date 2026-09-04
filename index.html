@@ -22,7 +22,7 @@
   button{border:0;border-radius:12px;padding:8px 12px;font-weight:700;cursor:pointer;background:#334155;color:#e2e8f0}
   button:hover{background:#475569} button.active{background:#34d399;color:#064e3b}
   #playBtn{background:#34d399;color:#064e3b}
-  select#assetSel{background:#0b1220;color:#e2e8f0;border:1px solid #334155;border-radius:12px;padding:8px 12px;font-weight:700;font-size:14px}
+  select#modeSel, select#assetSel{background:#0b1220;color:#e2e8f0;border:1px solid #334155;border-radius:12px;padding:8px 12px;font-weight:700;font-size:14px}
   .legend{display:flex;flex-wrap:wrap;gap:12px;font-size:12px;color:#cbd5e1;margin:8px 0 12px}
   .dot{width:12px;height:12px;border-radius:99px;display:inline-block;margin-right:6px;vertical-align:middle}
   .chart-wrap{width:100%;background:#0b1220;border-radius:14px 14px 0 0;overflow:hidden;position:relative}
@@ -52,6 +52,12 @@
   .fwd .d{font-size:11px;color:#94a3b8;margin-top:4px}
   #tip{position:absolute;z-index:8;display:none;pointer-events:none;background:#064e3bee;color:#ecfdf5;border:1px solid #34d39966;border-radius:10px;padding:8px 10px;font-size:12px}
   #ypBox{display:block}
+
+  select#modeSel{background:#0b1220;color:#e2e8f0;border:1px solid #334155;border-radius:12px;padding:8px 12px;font-weight:700;font-size:14px}
+  #maBox{display:none;align-items:center;gap:8px;flex-wrap:wrap}
+  #maBox input{width:64px;background:#0b1220;color:#e2e8f0;border:1px solid #334155;border-radius:10px;padding:7px 8px;font-weight:700}
+  #maBox label{font-size:12px;color:#94a3b8}
+
 </style>
 </head>
 <body>
@@ -67,9 +73,20 @@
         <div class="muted" id="headSub"></div>
       </div>
     </div>
-    <div style="text-align:right">
-      <div class="muted">最新</div>
-      <div id="headLast" style="font-size:20px;font-weight:900;color:#6ee7b7"></div>
+    <div class="row" style="gap:10px;justify-content:flex-end">
+      <select id="modeSel">
+        <option value="dd">回撤買進</option>
+        <option value="ma">均線 MA</option>
+      </select>
+      <span id="maBox">
+        <label>短</label><input id="maFast" type="number" min="2" max="400" value="21">
+        <label>長</label><input id="maSlow" type="number" min="3" max="600" value="60">
+        <button id="maApply">套用</button>
+      </span>
+      <div style="text-align:right">
+        <div class="muted">最新</div>
+        <div id="headLast" style="font-size:20px;font-weight:900;color:#6ee7b7"></div>
+      </div>
     </div>
   </div>
 </header>
@@ -77,7 +94,7 @@
   <div class="card">
     <div class="muted" style="color:#34d399">規則相同</div>
     <h2 id="ruleTitle"></h2>
-    <p class="note">從當時歷史高點往下量，每一波只記「第一次」碰到門檻。上方卡片的 1 年／3 年，只用這幾次，不把同一波的每一天重複計算。點圖上的點看 1M～3Y。</p>
+    <p class="note" id="ruleNote"></p>
   </div>
   <div class="grid3" id="evCards"></div>
   <div class="card">
@@ -112,7 +129,7 @@
     <div id="fwdGrid"></div>
   </div>
   <div class="card" style="padding:0;overflow:auto">
-    <div style="padding:14px 16px;border-bottom:1px solid #334155"><h3>每一波第一次碰到門檻</h3></div>
+    <div style="padding:14px 16px;border-bottom:1px solid #334155"><h3 id="epTitle">每一波第一次碰到門檻</h3></div>
     <table>
       <thead><tr>
         <th>門檻</th><th>買進日／成本</th><th class="r">再跌</th><th class="r">回成本</th>
@@ -135,10 +152,7 @@
       </tr></thead>
       <tbody id="sumBody"></tbody>
     </table>
-    <div class="muted" id="ypFoot" style="padding:10px 16px 14px;display:none">
-      參考（另一套算法，YP Finance 含息、且把所有跌超門檻的交易日都算進去）：
-      −10% 1年 +20.4%／勝率 87.3%；−20% 1年 +28.3%／3年勝率 100%；−30% 1年 +45.7%／1年勝率 100%。
-    </div>
+
   </div>
 </div>
 <footer>0050 為還原股價（含 2025/06 一拆四）。BTC 為 USD 收盤。歷史不代表未來。</footer>
@@ -165,6 +179,7 @@ const HZN = [
   {key:"3y", label:"3年", short:"3Y", color:"#34d399", bg:"rgba(52,211,153,.18)"}
 ];
 let assetId="0050", DATA=null, N=0, i0=0, i1=0, timer=null, selected=null;
+let mode="dd", maFast=21, maSlow=60, maBuys=[], maSeries=null;
 const parseDate=s=>new Date(s+"T00:00:00");
 const fmt=s=>s.replace(/-/g,"/");
 const pct=v=>v==null?"—":((v>0?"+":"")+v+"%");
@@ -177,13 +192,124 @@ function money(v){
 }
 function ths(){ return DATA.thresholds.map(String); }
 function allBuys(){
+  if(mode==="ma") return maBuys;
   const arr=[];
   ths().forEach((k,idx)=>DATA.buys[k].forEach(e=>arr.push(Object.assign({k, idx}, e))));
   return arr;
 }
 function colorOf(th){
+  if(th==="MA" || th==="ma") return "#38bdf8";
   const i=DATA.thresholds.indexOf(+th);
   return DOT[i]||DOT[0];
+}
+function smaAt(arr, i, n){
+  if(i+1<n) return null;
+  let s=0;
+  for(let k=i-n+1;k<=i;k++) s+=arr[k];
+  return s/n;
+}
+function daysUntilPx(series, i, target){
+  for(let j=i+1;j<series.length;j++){
+    if(series[j].p>=target-1e-9){
+      const a=parseDate(series[i].d), b=parseDate(series[j].d);
+      return {days:Math.round((b-a)/86400000), date:series[j].d};
+    }
+  }
+  return {days:null, date:null};
+}
+function fwdFrom(series, i, days){
+  const target=new Date(parseDate(series[i].d).getTime()+days*86400000);
+  for(let j=i;j<series.length;j++){
+    if(parseDate(series[j].d)>=target){
+      return {date:series[j].d, px:series[j].p, ret:Math.round((series[j].p/series[i].p-1)*1000)/10};
+    }
+  }
+  return {date:null, px:null, ret:null};
+}
+function computeMa(){
+  const series=DATA.series;
+  const px=series.map(p=>p.p);
+  let f=Math.round(+document.getElementById("maFast").value||21);
+  let s=Math.round(+document.getElementById("maSlow").value||60);
+  if(f<2) f=2; if(s<3) s=3;
+  if(f>s){ const t=f; f=s; s=t; }
+  maFast=f; maSlow=s;
+  document.getElementById("maFast").value=f;
+  document.getElementById("maSlow").value=s;
+  const fast=[], slow=[];
+  for(let i=0;i<px.length;i++){
+    fast.push(smaAt(px,i,f));
+    slow.push(smaAt(px,i,s));
+  }
+  maSeries={fast, slow};
+  const hz=[["1m",30],["3m",91],["6m",182],["9m",273],["1y",365],["3y",1095]];
+  const out=[];
+  for(let i=1;i<px.length;i++){
+    if(fast[i-1]==null||slow[i-1]==null||fast[i]==null||slow[i]==null) continue;
+    const cross = fast[i-1]<=slow[i-1] && fast[i]>slow[i];
+    if(!cross) continue;
+    const buy=px[i];
+    let extra=buy, extraJ=i;
+    const rec=daysUntilPx(series,i,buy);
+    const end = rec.days==null ? px.length-1 : series.findIndex((p,idx)=>idx>i && p.d===rec.date);
+    const last=end>=0?end:px.length-1;
+    for(let j=i;j<=last;j++){
+      if(px[j]<extra){ extra=px[j]; extraJ=j; }
+    }
+    const e={
+      th:"MA", k:"MA", idx:0,
+      buy_date:series[i].d, buy_px:Math.round(buy*100)/100,
+      extra_dd:Math.round((extra/buy-1)*1000)/10,
+      trough_date:series[extraJ].d, trough_px:Math.round(extra*100)/100,
+      cost_date:rec.date, cost_days:rec.days,
+      ret_1y:null, ret_3y:null, fwd:{}
+    };
+    hz.forEach(([name,d])=>{
+      const r=fwdFrom(series,i,d);
+      e.fwd[name]=r;
+      if(name==="1y") e.ret_1y=r.ret;
+      if(name==="3y") e.ret_3y=r.ret;
+    });
+    out.push(e);
+  }
+  maBuys=out;
+}
+function applyMode(){
+  document.getElementById("modeSel").value=mode;
+  document.getElementById("maBox").style.display = mode==="ma" ? "flex" : "none";
+  const name = assetId==="BTC" ? "比特幣" : "0050";
+  if(mode==="ma"){
+    computeMa();
+    document.getElementById("headTitle").textContent = `${name}：均線黃金交叉`;
+    document.getElementById("headSub").textContent = `${DATA.start} – ${DATA.asof}｜${maFast}MA 上穿 ${maSlow}MA` + (DATA.updated ? `｜資料更新 ${DATA.updated}` : "");
+    document.getElementById("ruleTitle").innerHTML = `短均線（${maFast}）上穿長均線（${maSlow}）當天買進<br>每一個黃金交叉算一次，看回成本與之後各期漲幅`;
+    document.getElementById("ruleNote").textContent = "黃金交叉＝短均線從下方穿越長均線。1年／3年只用已經滿期的交叉，不含配息。點圖上藍點看 1M～3Y。";
+    document.getElementById("chartHint").textContent = `藍點＝${maFast}MA 上穿 ${maSlow}MA　線上黃＝短均　紫＝長均`;
+    document.getElementById("legend").innerHTML =
+      `<span><i class="dot" style="background:#38bdf8"></i>黃金交叉買進</span>
+       <span><i class="dot" style="background:#fbbf24;border-radius:3px"></i>${maFast}MA</span>
+       <span><i class="dot" style="background:#c084fc;border-radius:3px"></i>${maSlow}MA</span>
+       <span><i class="dot" style="background:#22d3ee;border-radius:3px"></i>1M</span>
+       <span><i class="dot" style="background:#34d399;border-radius:3px"></i>3Y</span>`;
+    document.getElementById("epTitle").textContent = `每一次 ${maFast}/${maSlow} 黃金交叉`;
+    document.getElementById("ypBox").style.display = "block";
+  } else {
+    document.getElementById("headTitle").textContent = assetId==="BTC" ? "比特幣：從高點回撤買進" : "0050：從高點回撤買進";
+    document.getElementById("headSub").textContent = `${DATA.start} – ${DATA.asof}｜當時高點往下量` + (DATA.updated ? `｜資料更新 ${DATA.updated}` : "");
+    document.getElementById("ruleTitle").innerHTML = assetId==="BTC"
+      ? "跌破 −30%／−40%／−50% 當天買進<br>繼續跌沒關係，看多久回到成本、之後各期漲多少"
+      : "跌破 −10%／−20%／−30% 當天買進<br>繼續跌沒關係，看多久回到成本、之後各期漲多少";
+    document.getElementById("ruleNote").textContent = "從當時歷史高點往下量，每一波只記第一次碰到門檻。上方卡片的 1 年／3 年只用這幾次。點圖上的點看 1M～3Y。";
+    document.getElementById("chartHint").textContent =
+      DATA.thresholds.map((t,i)=>["黃","粉紅","深紅"][i]+" −"+t+"%").join("　")+"　點一下看持有期";
+    document.getElementById("legend").innerHTML =
+      DATA.thresholds.map((t,i)=>`<span><i class="dot" style="background:${DOT[i]}"></i>−${t}% 買進</span>`).join("")+
+      `<span><i class="dot" style="background:#22d3ee;border-radius:3px"></i>1M</span>
+       <span><i class="dot" style="background:#34d399;border-radius:3px"></i>3Y</span>`;
+    document.getElementById("epTitle").textContent = "每一波第一次碰到門檻";
+    document.getElementById("ypBox").style.display = assetId==="0050" ? "block" : "none";
+  }
+  document.getElementById("headLast").textContent = money(DATA.last);
 }
 function loadAsset(id){
   assetId=id;
@@ -191,19 +317,7 @@ function loadAsset(id){
   N=DATA.series.length;
   i0=0; i1=N-1; selected=null; if(timer){clearInterval(timer); timer=null;}
   document.getElementById("assetSel").value=id;
-  document.getElementById("headTitle").textContent = id==="BTC" ? "比特幣：從高點回撤買進" : "0050：從高點回撤買進";
-  document.getElementById("headSub").textContent = `${DATA.start} – ${DATA.asof}｜當時高點往下量`;
-  document.getElementById("headLast").textContent = money(DATA.last);
-  document.getElementById("ruleTitle").innerHTML = id==="BTC"
-    ? "跌破 −30%／−40%／−50% 當天買進<br>繼續跌沒關係，看多久回到成本、之後各期漲多少"
-    : "跌破 −10%／−20%／−30% 當天買進<br>繼續跌沒關係，看多久回到成本、之後各期漲多少";
-  document.getElementById("chartHint").textContent =
-    DATA.thresholds.map((t,i)=>["黃","粉紅","深紅"][i]+" −"+t+"%").join("　")+"　點一下看持有期";
-  document.getElementById("legend").innerHTML =
-    DATA.thresholds.map((t,i)=>`<span><i class="dot" style="background:${DOT[i]}"></i>−${t}% 買進</span>`).join("")+
-    `<span><i class="dot" style="background:#22d3ee;border-radius:3px"></i>1M</span>
-     <span><i class="dot" style="background:#34d399;border-radius:3px"></i>3Y</span>`;
-  document.getElementById("ypBox").style.display = id==="0050" ? "block" : "none";
+  applyMode();
   renderFwd(null);
   evCards(); epTable(); sumTable();
   drawMain(); drawBrush();
@@ -212,8 +326,9 @@ function avg(arr){ return arr.length?arr.reduce((a,b)=>a+b,0)/arr.length:null; }
 function med(arr){ if(!arr.length) return null; const s=arr.slice().sort((a,b)=>a-b); return s[Math.floor(s.length/2)]; }
 function win(arr){ return arr.length?100*arr.filter(x=>x>0).length/arr.length:null; }
 function evCards(){
-  document.getElementById("evCards").innerHTML = ths().map((k,i)=>{
-    const eps=DATA.buys[k];
+  const keys = mode==="ma" ? ["MA"] : ths();
+  document.getElementById("evCards").innerHTML = keys.map((k,i)=>{
+    const eps = mode==="ma" ? maBuys : DATA.buys[k];
     const costs=eps.map(e=>e.cost_days).filter(x=>x!=null);
     const r1=eps.map(e=>e.ret_1y).filter(x=>x!=null);
     const r3=eps.map(e=>e.ret_3y).filter(x=>x!=null);
@@ -221,7 +336,7 @@ function evCards(){
     const fmtA=v=>v==null?"—":((v>0?"+":"")+v.toFixed(1)+"%");
     const fmtW=v=>v==null?"—":v.toFixed(0)+"%";
     return `<div class="card ${best?"best":""}">
-      <div class="row"><b>跌 −${k}% 買</b><span class="pill">${eps.length} 次週期</span></div>
+      <div class="row"><b>${mode==="ma"? (maFast+"/"+maSlow+" 黃金交叉") : ("跌 −"+k+"% 買")}</b><span class="pill">${eps.length} 次</span></div>
       <div class="muted" style="margin-top:10px">回成本中位數（這 ${eps.length} 次）</div>
       <div class="kpi g">${med(costs)??"—"} <span style="font-size:14px">天</span></div>
       <div class="muted">平均 ${costs.length?Math.round(avg(costs)): "—"} 天　${costs.length}/${eps.length} 次回到成本</div>
@@ -236,7 +351,7 @@ function renderFwd(e){
   const box=document.getElementById("fwdBox");
   if(!e){ box.style.display="none"; return; }
   box.style.display="block";
-  document.getElementById("fwdTitle").textContent = `−${e.th}% 買進　${e.buy_date}　成本 ${money(e.buy_px)}`;
+  document.getElementById("fwdTitle").textContent = (e.th==="MA"? `${maFast}/${maSlow} 黃金交叉`:`−${e.th}% 買進`) + `　${e.buy_date}　成本 ${money(e.buy_px)}`;
   document.getElementById("fwdSub").textContent = `回成本 ${e.cost_date||"尚未"}（${e.cost_days??"—"} 天）　買進後再跌 ${e.extra_dd}%`;
   document.getElementById("fwdGrid").innerHTML = HZN.map(h=>{
     const f=e.fwd[h.key]; const ret=f&&f.ret;
@@ -249,11 +364,10 @@ function renderFwd(e){
 }
 function sumTable(){
   const box=document.getElementById("ypBox");
-  const foot=document.getElementById("ypFoot");
-  foot.style.display = assetId==="0050" ? "block" : "none";
-  document.getElementById("sumTitle").textContent = assetId==="BTC" ? "比特幣：與上方卡片同一批週期" : "0050：與上方卡片同一批週期";
-  document.getElementById("sumBody").innerHTML = ths().map((k,i)=>{
-    const eps=DATA.buys[k];
+  document.getElementById("sumTitle").textContent = (assetId==="BTC"?"比特幣":"0050") + (mode==="ma"?`：${maFast}/${maSlow} 黃金交叉`:"：與上方卡片同一批週期");
+  const keys = mode==="ma" ? ["MA"] : ths();
+  document.getElementById("sumBody").innerHTML = keys.map((k,i)=>{
+    const eps = mode==="ma" ? maBuys : DATA.buys[k];
     const costs=eps.map(e=>e.cost_days).filter(x=>x!=null);
     const r1=eps.map(e=>e.ret_1y).filter(x=>x!=null);
     const r3=eps.map(e=>e.ret_3y).filter(x=>x!=null);
@@ -265,7 +379,7 @@ function sumTable(){
     const fw=v=>v==null?"—":v.toFixed(0)+"%";
     const bg=i===1?' style="background:#064e3b22"':"";
     return `<tr${bg}>
-      <td style="color:${colorOf(k)}"><b>−${k}%</b></td>
+      <td style="color:${colorOf(k)}"><b>${k==="MA"?maFast+"/"+maSlow:"−"+k+"%"}</b></td>
       <td class="r">${eps.length} 次</td>
       <td class="r">${m(costs)??"—"} 天</td>
       <td class="r ${a(r1)>=0?"g":"red"}">${fa(a(r1))} <span class="muted">(${r1.length})</span></td>
@@ -280,7 +394,7 @@ function epTable(){
   document.getElementById("epBody").innerHTML = allBuys().sort((a,b)=>a.buy_date<b.buy_date?1:-1).map(e=>{
     const cell=k=>{const r=e.fwd[k].ret; return `<td class="r ${cls(r)}">${pct(r)}</td>`;};
     return `<tr>
-      <td style="color:${colorOf(e.th)}"><b>−${e.th}%</b></td>
+      <td style="color:${colorOf(e.th)}"><b>${e.th==="MA"?maFast+"/"+maSlow:"−"+e.th+"%"}</b></td>
       <td>${e.buy_date}<div class="muted">${money(e.buy_px)}</div></td>
       <td class="r">${e.extra_dd}%</td>
       <td class="r g">${e.cost_days??"—"}天</td>
@@ -363,6 +477,18 @@ function drawMain(){
       labels+=`<text x="${xb.toFixed(1)}" y="${C.m.t+C.plotH+16}" text-anchor="middle" fill="#cbd5e1" font-size="11">買進 ${e.buy_date}</text>`;
     }
   }
+  let maLines="";
+  if(mode==="ma" && maSeries){
+    const mk=(arr,col)=>{
+      const pts=[];
+      for(let i=i0;i<=i1;i++){
+        const v=arr[i]; if(v==null) continue;
+        pts.push(C.xS(DATA.series[i].d).toFixed(1)+","+C.yOf(v).toFixed(1));
+      }
+      return pts.length>1?`<polyline fill="none" stroke="${col}" stroke-width="1.5" opacity="0.9" points="${pts.join(" ")}"/>`:"";
+    };
+    maLines = mk(maSeries.fast,"#fbbf24")+mk(maSeries.slow,"#c084fc");
+  }
   const buys=allBuys(); let marks="";
   buys.forEach((e,n)=>{
     const t=parseDate(e.buy_date).getTime(); if(t<C.t0||t>C.t1) return;
@@ -377,6 +503,7 @@ function drawMain(){
       <rect width="${C.W}" height="${C.H}" fill="#0b1220"/>
       ${yticks}${bands}
       <polyline fill="none" stroke="#38bdf8" stroke-width="2" opacity="${selected?0.25:1}" points="${pts}"/>
+      ${maLines}
       ${segs}${marks}${marks2}${labels}${xticks}
       <circle cx="${C.xS(last.d)}" cy="${C.yOf(last.p)}" r="3.5" fill="#38bdf8"/>
       <text x="${C.m.l}" y="${C.H-8}" fill="#64748b" font-size="11">${fmt(series[0].d)} → ${fmt(last.d)}</text>
@@ -493,6 +620,14 @@ function bindBrush(){
   window.addEventListener("pointercancel", up);
 }
 document.getElementById("assetSel").onchange=e=>loadAsset(e.target.value);
+document.getElementById("modeSel").onchange=e=>{
+  mode=e.target.value; selected=null;
+  applyMode(); renderFwd(null); evCards(); epTable(); sumTable(); drawMain();
+};
+document.getElementById("maApply").onclick=()=>{
+  mode="ma"; selected=null;
+  applyMode(); renderFwd(null); evCards(); epTable(); sumTable(); drawMain();
+};
 document.querySelectorAll(".preset").forEach(b=>b.onclick=()=>applyPreset(b.dataset.preset));
 document.getElementById("clearBtn").onclick=()=>{ selected=null; renderFwd(null); drawMain(); };
 document.getElementById("playBtn").onclick=()=>{
