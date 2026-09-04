@@ -244,8 +244,11 @@ function maEventsFor(period, maArr, idx){
     const buy=px[i];
     let extra=buy, extraJ=i, peak=buy, peakJ=i;
     const rec=daysUntilPx(series,i,buy);
-    const last = rec.date ? series.findIndex((p,j)=>j>i && p.d===rec.date) : px.length-1;
-    const end = last>=0?last:px.length-1;
+    const holdTo=new Date(parseDate(series[i].d).getTime()+365*86400000);
+    let end=px.length-1;
+    for(let j=i;j<px.length;j++){
+      if(parseDate(series[j].d)>=holdTo){ end=j; break; }
+    }
     for(let j=i;j<=end;j++){
       if(px[j]<extra){ extra=px[j]; extraJ=j; }
       if(px[j]>peak){ peak=px[j]; peakJ=j; }
@@ -367,8 +370,8 @@ function evCards(){
       <div class="row"><span>1年勝率</span><b>${fmtW(win(r1))}</b></div>
       <div class="row"><span>3年平均（${r3.length}筆）</span><b class="${avg(r3)>=0?"g":"red"}">${fmtA(avg(r3))}</b></div>
       <div class="row"><span>3年勝率</span><b class="g">${fmtW(win(r3))}</b></div>
-      ${mode==="ma"?`<div class="row"><span>觸及停損 ${slPct}%</span><b class="red">${eps.length?Math.round(100*eps.filter(e=>e.stopped).length/eps.length):0}%</b></div>
-      <div class="row"><span>觸及停利 +${tpPct}%</span><b class="g">${eps.length?Math.round(100*eps.filter(e=>e.takeprofit).length/eps.length):0}%</b></div>`:""}
+      ${mode==="ma"?`<div class="row"><span>1年內觸及停損 ${slPct}%</span><b class="red">${eps.length?Math.round(100*eps.filter(e=>e.stopped).length/eps.length):0}%</b></div>
+      <div class="row"><span>1年內觸及停利 +${tpPct}%</span><b class="g">${eps.length?Math.round(100*eps.filter(e=>e.takeprofit).length/eps.length):0}%</b></div>`:""}
     </div>`;
   }).join("");
 }
