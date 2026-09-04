@@ -81,6 +81,7 @@
       <span id="maBox">
         <label>短</label><input id="maFast" type="number" min="2" max="400" value="21">
         <label>長</label><input id="maSlow" type="number" min="3" max="600" value="60">
+        <label>停損%</label><input id="slPct" type="number" step="0.5" max="-0.1" value="-5">
         <button id="maApply">套用</button>
       </span>
       <div style="text-align:right">
@@ -179,7 +180,7 @@ const HZN = [
   {key:"3y", label:"3年", short:"3Y", color:"#34d399", bg:"rgba(52,211,153,.18)"}
 ];
 let assetId="0050", DATA=null, N=0, i0=0, i1=0, timer=null, selected=null;
-let mode="dd", maFast=21, maSlow=60, maBuys=[], maSeries=null;
+let mode="dd", maFast=21, maSlow=60, slPct=-5, maBuys=[], maSeries=null;
 const parseDate=s=>new Date(s+"T00:00:00");
 const fmt=s=>s.replace(/-/g,"/");
 const pct=v=>v==null?"—":((v>0?"+":"")+v+"%");
@@ -197,7 +198,8 @@ function allBuys(){
   ths().forEach((k,idx)=>DATA.buys[k].forEach(e=>arr.push(Object.assign({k, idx}, e))));
   return arr;
 }
-function colorOf(th){
+function colorOf(th, ev){
+  if(mode==="ma" && ev && ev.stopped) return "#ef4444";
   if(mode==="ma"){
     if(String(th)===String(maFast)) return "#fbbf24";
     if(String(th)===String(maSlow)) return "#c084fc";
@@ -250,6 +252,7 @@ function maEventsFor(period, maArr, idx){
       th:String(period), k:String(period), idx:idx, period:period,
       buy_date:series[i].d, buy_px:Math.round(buy*100)/100,
       extra_dd:Math.round((extra/buy-1)*1000)/10,
+      stopped:false,
       trough_date:series[extraJ].d, trough_px:Math.round(extra*100)/100,
       cost_date:rec.date, cost_days:rec.days,
       ret_1y:null, ret_3y:null, fwd:{}
@@ -279,7 +282,11 @@ function computeMa(){
     slow.push(smaAt(px,i,s));
   }
   maSeries={fast, slow};
+  slPct = +document.getElementById("slPct").value;
+  if(!(slPct<0)) slPct=-5;
+  document.getElementById("slPct").value=slPct;
   maBuys = maEventsFor(f, fast, 0).concat(maEventsFor(s, slow, 1));
+  maBuys.forEach(e=>{ e.stopped = e.extra_dd!=null && e.extra_dd<=slPct; });
 }
 function applyMode(){
   document.getElementById("modeSel").value=mode;
@@ -291,10 +298,11 @@ function applyMode(){
     document.getElementById("headSub").textContent = `${DATA.start} – ${DATA.asof}｜收盤跌破 ${maFast}MA / ${maSlow}MA` + (DATA.updated ? `｜資料更新 ${DATA.updated}` : "");
     document.getElementById("ruleTitle").innerHTML = `收盤跌破 ${maFast}MA 或 ${maSlow}MA 當天買進<br>從上到下穿越才算一次，比較哪一條期望值較高`;
     document.getElementById("ruleNote").textContent = "跌破＝昨天收盤還在均線上（含觸及），今天收盤跌到均線下。同一條均線要先站回去，才會再記下一次。不含配息。";
-    document.getElementById("chartHint").textContent = `黃點＝跌破 ${maFast}MA　紫點＝跌破 ${maSlow}MA　黃線／紫線＝均線`;
+    document.getElementById("chartHint").textContent = `黃＝跌破 ${maFast}MA　紫＝跌破 ${maSlow}MA　紅＝買進後再跌到 ${slPct}%`;
     document.getElementById("legend").innerHTML =
       `<span><i class="dot" style="background:#fbbf24"></i>跌破 ${maFast}MA</span>
        <span><i class="dot" style="background:#c084fc"></i>跌破 ${maSlow}MA</span>
+       <span><i class="dot" style="background:#ef4444"></i>觸及停損 ${slPct}%</span>
        <span><i class="dot" style="background:#22d3ee;border-radius:3px"></i>1M</span>
        <span><i class="dot" style="background:#34d399;border-radius:3px"></i>3Y</span>`;
     document.getElementById("epTitle").textContent = `每一次跌破 ${maFast}MA / ${maSlow}MA`;
@@ -350,6 +358,7 @@ function evCards(){
       <div class="row"><span>1年勝率</span><b>${fmtW(win(r1))}</b></div>
       <div class="row"><span>3年平均（${r3.length}筆）</span><b class="${avg(r3)>=0?"g":"red"}">${fmtA(avg(r3))}</b></div>
       <div class="row"><span>3年勝率</span><b class="g">${fmtW(win(r3))}</b></div>
+      ${mode==="ma"?`<div class="row"><span>觸及停損 ${slPct}%</span><b class="red">${eps.length?Math.round(100*eps.filter(e=>e.stopped).length/eps.length):0}%</b></div>`:""}
     </div>`;
   }).join("");
 }
@@ -358,7 +367,7 @@ function renderFwd(e){
   if(!e){ box.style.display="none"; return; }
   box.style.display="block";
   document.getElementById("fwdTitle").textContent = (mode==="ma"? `跌破 ${e.period}MA`:`−${e.th}% 買進`) + `　${e.buy_date}　成本 ${money(e.buy_px)}`;
-  document.getElementById("fwdSub").textContent = `回成本 ${e.cost_date||"尚未"}（${e.cost_days??"—"} 天）　買進後再跌 ${e.extra_dd}%`;
+  document.getElementById("fwdSub").textContent = `回成本 ${e.cost_date||"尚未"}（${e.cost_days??"—"} 天）　買進後再跌 ${e.extra_dd}%` + (mode==="ma"?(e.stopped?`　已觸及停損 ${slPct}%`:`　未觸及停損 ${slPct}%`):"");
   document.getElementById("fwdGrid").innerHTML = HZN.map(h=>{
     const f=e.fwd[h.key]; const ret=f&&f.ret;
     return `<div class="fwd" style="border-color:${h.color}66">
@@ -400,7 +409,7 @@ function epTable(){
   document.getElementById("epBody").innerHTML = allBuys().sort((a,b)=>a.buy_date<b.buy_date?1:-1).map(e=>{
     const cell=k=>{const r=e.fwd[k].ret; return `<td class="r ${cls(r)}">${pct(r)}</td>`;};
     return `<tr>
-      <td style="color:${colorOf(e.th)}"><b>${mode==="ma"?"跌破 "+e.period+"MA":"−"+e.th+"%"}</b></td>
+      <td style="color:${colorOf(e.th,e)}"><b>${mode==="ma"?"跌破 "+e.period+"MA":"−"+e.th+"%"}</b></td>
       <td>${e.buy_date}<div class="muted">${money(e.buy_px)}</div></td>
       <td class="r">${e.extra_dd}%</td>
       <td class="r g">${e.cost_days??"—"}天</td>
@@ -502,7 +511,7 @@ function drawMain(){
     const r=e.idx===2?7:e.idx===1?6:5;
     const on=selected && selected.buy_date===e.buy_date && selected.th===e.th;
     marks+=`<circle class="buy-hit" data-n="${n}" cx="${x}" cy="${y}" r="${r+11}" fill="transparent" style="cursor:pointer"/>`;
-    marks+=`<circle cx="${x}" cy="${y}" r="${on?r+2:r}" fill="${colorOf(e.th)}" stroke="${on?"#fff":"#0b1220"}" stroke-width="${on?2:1.4}" style="pointer-events:none"/>`;
+    marks+=`<circle cx="${x}" cy="${y}" r="${on?r+2:r}" fill="${colorOf(e.th,e)}" stroke="${on?"#fff":"#0b1220"}" stroke-width="${on?2:1.4}" style="pointer-events:none"/>`;
   });
   box.innerHTML=`<div id="tip"></div>
     <svg viewBox="0 0 ${C.W} ${C.H}" id="mainSvg">
