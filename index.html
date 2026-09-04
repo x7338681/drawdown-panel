@@ -117,6 +117,18 @@
       </span>
     </div>
     <div id="simKpis"></div>
+    <div style="margin-top:12px">
+      <button id="simLogBtn" type="button">顯示交易紀錄</button>
+    </div>
+    <div id="simLogWrap" style="display:none;margin-top:12px;max-height:420px;overflow:auto;border:1px solid #33415566;border-radius:12px">
+      <table>
+        <thead><tr>
+          <th>#</th><th>進場</th><th class="r">進價</th><th>出場</th><th class="r">出價</th>
+          <th>結果</th><th class="r">報酬</th><th class="r">下單金額</th><th class="r">損益</th>
+        </tr></thead>
+        <tbody id="simLogBody"></tbody>
+      </table>
+    </div>
   </div>
   <div class="card">
     <div class="row">
@@ -450,6 +462,45 @@ function simCard(){
     <div>完成出場<b> ${done.length}</b> / ${eps.length} 筆</div>
     <div>尚未出場<b> ${open}</b></div>
     <div>最大回撤<b class="red"> ${maxdd.toFixed(1)}%</b></div>`;
+  const rows=done.slice().sort((a,b)=>a.buy_date<b.buy_date?-1:1);
+  const logEq=[];
+  let e2=init;
+  const events=[];
+  rows.forEach(e=>{ events.push({t:e.buy_date,k:"in",e}); events.push({t:e.exit.date,k:"out",e}); });
+  events.sort((a,b)=> a.t<b.t?-1 : a.t>b.t?1 : (a.k==="in"?-1:1));
+  const sz2=new Map();
+  events.forEach(ev=>{
+    if(ev.k==="in") sz2.set(ev.e, e2*(bet/100));
+    else e2 += (sz2.get(ev.e)||0)*((ev.e.exit.ret||0)/100);
+  });
+  document.getElementById("simLogBody").innerHTML = rows.map((e,i)=>{
+    const size=sz2.get(e)||0;
+    const pnl=size*((e.exit.ret||0)/100);
+    const kind=e.exit.kind==="tp"?"停利":"停損";
+    const kc=e.exit.kind==="tp"?"g":"red";
+    return `<tr>
+      <td>${i+1}</td>
+      <td>${e.buy_date}<div class="muted">${mode==="ma"?"跌破 "+e.period+"MA":"−"+e.th+"%"}</div></td>
+      <td class="r">${money(e.buy_px)}</td>
+      <td>${e.exit.date}<div class="muted">${e.exit.days??"—"} 天</div></td>
+      <td class="r">${money(e.exit.px)}</td>
+      <td class="${kc}">${kind}</td>
+      <td class="r ${kc}">${pct(e.exit.ret)}</td>
+      <td class="r">${size.toFixed(2)}</td>
+      <td class="r ${pnl>=0?"g":"red"}">${pnl>=0?"+":""}${pnl.toFixed(2)}</td>
+    </tr>`;
+  }).join("") || `<tr><td colspan="9" class="muted">這個區間沒有完成出場的單</td></tr>`;
+}
+function bindSimLog(){
+  const btn=document.getElementById("simLogBtn");
+  const wrap=document.getElementById("simLogWrap");
+  if(!btn||btn.dataset.bound) return;
+  btn.dataset.bound="1";
+  btn.onclick=()=>{
+    const on=wrap.style.display!=="none";
+    wrap.style.display=on?"none":"block";
+    btn.textContent=on?"顯示交易紀錄":"收起交易紀錄";
+  };
 }
 function evCards(){
   const keys = mode==="ma" ? [String(maFast), String(maSlow)] : ths();
@@ -789,6 +840,7 @@ document.getElementById("modeSel").onchange=e=>{
   mode=e.target.value; selected=null;
   applyMode(); renderFwd(null); evCards(); epTable(); sumTable(); drawMain();
 };
+bindSimLog();
 document.getElementById("simApply").onclick=()=>simCard();
 document.getElementById("initCash").onchange=()=>simCard();
 document.getElementById("betPct").onchange=()=>simCard();
