@@ -104,7 +104,7 @@
   </div>
   <div class="muted" id="statRange" style="margin:4px 0 8px"></div>
   <div class="grid3" id="evCards"></div>
-  <div class="card" id="simCard">
+  <div class="card" id="simCard" style="display:none">
     <div class="row">
       <div>
         <h3>模擬單</h3>
@@ -463,13 +463,12 @@ function simCard(){
     <div>尚未出場<b> ${open}</b></div>
     <div>最大回撤<b class="red"> ${maxdd.toFixed(1)}%</b></div>`;
   const rows=done.slice().sort((a,b)=>a.buy_date<b.buy_date?-1:1);
-  const logEq=[];
   let e2=init;
-  const events=[];
-  rows.forEach(e=>{ events.push({t:e.buy_date,k:"in",e}); events.push({t:e.exit.date,k:"out",e}); });
-  events.sort((a,b)=> a.t<b.t?-1 : a.t>b.t?1 : (a.k==="in"?-1:1));
+  const ev2=[];
+  rows.forEach(e=>{ ev2.push({t:e.buy_date,k:"in",e}); ev2.push({t:e.exit.date,k:"out",e}); });
+  ev2.sort((a,b)=> a.t<b.t?-1 : a.t>b.t?1 : (a.k==="in"?-1:1));
   const sz2=new Map();
-  events.forEach(ev=>{
+  ev2.forEach(ev=>{
     if(ev.k==="in") sz2.set(ev.e, e2*(bet/100));
     else e2 += (sz2.get(ev.e)||0)*((ev.e.exit.ret||0)/100);
   });
