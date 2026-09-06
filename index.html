@@ -124,7 +124,7 @@
       <table>
         <thead><tr>
           <th>#</th><th>進場</th><th class="r">進價</th><th>出場</th><th class="r">出價</th>
-          <th>結果</th><th class="r">報酬</th><th class="r">下單金額</th><th class="r">損益</th>
+          <th>結果</th><th class="r">報酬</th><th class="r">下單金額</th><th class="r">損益</th><th class="r">總資產</th>
         </tr></thead>
         <tbody id="simLogBody"></tbody>
       </table>
@@ -462,21 +462,26 @@ function simCard(){
     <div>完成出場<b> ${done.length}</b> / ${eps.length} 筆</div>
     <div>尚未出場<b> ${open}</b></div>
     <div>最大回撤<b class="red"> ${maxdd.toFixed(1)}%</b></div>`;
-  const rows=done.slice().sort((a,b)=>a.buy_date<b.buy_date?-1:1);
+  const rows=done.slice().sort((a,b)=> a.exit.date<b.exit.date?-1 : a.exit.date>b.exit.date?1 : (a.buy_date<b.buy_date?-1:1));
   let e2=init;
   const ev2=[];
-  rows.forEach(e=>{ ev2.push({t:e.buy_date,k:"in",e}); ev2.push({t:e.exit.date,k:"out",e}); });
+  done.forEach(e=>{ ev2.push({t:e.buy_date,k:"in",e}); ev2.push({t:e.exit.date,k:"out",e}); });
   ev2.sort((a,b)=> a.t<b.t?-1 : a.t>b.t?1 : (a.k==="in"?-1:1));
   const sz2=new Map();
+  const eqAfter=new Map();
   ev2.forEach(ev=>{
     if(ev.k==="in") sz2.set(ev.e, e2*(bet/100));
-    else e2 += (sz2.get(ev.e)||0)*((ev.e.exit.ret||0)/100);
+    else {
+      e2 += (sz2.get(ev.e)||0)*((ev.e.exit.ret||0)/100);
+      eqAfter.set(ev.e, e2);
+    }
   });
   document.getElementById("simLogBody").innerHTML = rows.map((e,i)=>{
     const size=sz2.get(e)||0;
     const pnl=size*((e.exit.ret||0)/100);
     const kind=e.exit.kind==="tp"?"停利":"停損";
     const kc=e.exit.kind==="tp"?"g":"red";
+    const tot=eqAfter.get(e);
     return `<tr>
       <td>${i+1}</td>
       <td>${e.buy_date}<div class="muted">${mode==="ma"?"跌破 "+e.period+"MA":"−"+e.th+"%"}</div></td>
@@ -487,8 +492,9 @@ function simCard(){
       <td class="r ${kc}">${pct(e.exit.ret)}</td>
       <td class="r">${size.toFixed(2)}</td>
       <td class="r ${pnl>=0?"g":"red"}">${pnl>=0?"+":""}${pnl.toFixed(2)}</td>
+      <td class="r">${tot==null?"—":tot.toFixed(2)}</td>
     </tr>`;
-  }).join("") || `<tr><td colspan="9" class="muted">這個區間沒有完成出場的單</td></tr>`;
+  }).join("") || `<tr><td colspan="10" class="muted">這個區間沒有完成出場的單</td></tr>`;
 }
 function bindSimLog(){
   const btn=document.getElementById("simLogBtn");
